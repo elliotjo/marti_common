@@ -290,11 +290,21 @@ bool projectOntoRouteWindow(
   size_t end_index;
   route.findPointId(end_index, end.id);
 
-  // These are the indices of the points, but we are going to use them
-  // as the index of segments, which means that if they are at the end
-  // of the route, we need to back them off by one.
-  start_index = std::max(start_index, route.points.size()-1);
-  end_index = std::max(end_index, route.points.size()-1);
+  // If either of the points are past the end of the route, we want to
+  // back them up to the previous segment to reduce the number of
+  // special cases we have to handle.
+  if (start_index+1 == route.points.size()-1) {
+    start_index -= 1;
+    start.id = route.points[start_index].id();
+    start.distance += (route.points[start_index+1].position() -
+                       route.points[start_index+0].position()).length();
+  }
+  if (end_index+1 == route.points.size()-1) {
+    end_index -= 1;
+    end.id = route.points[end_index].id();
+    end.distance += (route.points[end_index+1].position() -
+                     route.points[end_index+0].position()).length();
+  }
 
   // Although it causes a little duplication, it's easier over all to
   // explicitly handle the special case where the window is over a
