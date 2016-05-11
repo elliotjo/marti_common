@@ -222,19 +222,158 @@ bool projectOntoRoute(mnm::RoutePosition &position,
                                  point,
                                  true, false);
   } else if (extrapolate_past_end && min_segment_index + 2 == route.points.size()) {
-    size_t i = min_segment_index - 1;
+    size_t i = min_segment_index;
     nearestDistanceToLineSegment(min_distance_from_line,
                                  min_distance_on_line,
                                  route.points[i+0].position(),
                                  route.points[i+1].position(),
                                  point,
                                  false, true);
+
+    // The end of the route is a special case.  If we go past the end,
+    // we want to return a position with the id of the last point and
+    // the distance past it.  This annoying complicates things in a
+    // number of places, but makes it easy to check if a point is past
+    // the end of a route.
+    double last_length = (route.points[i+1].position() - route.points[i+0].position()).length();
+    if (min_distance_on_line > last_length) {
+      min_segment_index++;
+      min_distance_on_line -= last_length;
+    }
   }
 
   position.id = route.points[min_segment_index].id();
   position.distance = min_distance_on_line;
   return true;
 }
+
+
+bool projectOntoRouteWindow(
+  mnm::RoutePosition &position,
+  const Route &route,
+  const tf::Vector3 &point,
+  const mnm::RoutePosition &window_start,
+  const mnm::RoutePosition &window_end)
+{
+  if (route.points.size() < 2) {
+    // We can't do anything with this.
+    return false;
+  }
+
+  // First we normalize the window boundaries.
+  mnm::RoutePosition start;
+  if (!normalizeRoutePosition(start, route, window_start)) {
+    return false;
+  }
+  mnm::RoutePosition end;
+  if (!normalizeRoutePosition(start, route, window_end)) {
+    return false;
+  }
+
+  // Handle the special case where the start and end points are
+  // identical.
+  if (start.id == end.id && start.distance == end.distance) {
+    position = start;
+    return true;
+  }
+
+  // Fix the ordering so that start comes before end.
+  if ((end.id < start.id) ||
+      (end.id == start.id && end.distance < start.distance)) {
+    std::swap(end, start);
+  }
+
+  // Find the indices of the start and end points.  Since we have
+  // normalized positions, we know they exist in the route.
+  size_t start_index;
+  route.findPointId(start_index, start.id);
+  size_t end_index;
+  route.findPointId(end_index, end.id);
+
+  // These are the indices of the points, but we are going to use them
+  // as the index of segments, which means that if they are at the end
+  // of the route, we need to back them off by one.
+  start_index = std::max(start_index, route.points.size()-1);
+  end_index = std::max(end_index, route.points.size()-1);
+
+  // Although it causes a little duplication, it's easier over all to
+  // explicitly handle the special case where the window is over a
+  // single segment.
+  if (start_index == end_index) {
+    double distance_from_line;
+    double distance_on_line;
+
+    nearestDistanceToLineSegment(distance_from_line,
+                                 distance_on_line,
+                                 route.points[start_index+0].position(),
+                                 route.points[start_index+1].position(),
+                                 point,
+                                 true, true);
+
+    if (distance_on_line < start.distance) {
+      distance_on_line = start.distance;
+    } else if (distance_on_line > end.distance) {
+      distance_on_line = end.distance;
+    }
+
+    position.id = start.id;
+    position.distance = distance_on_line;
+    return true;
+  }
+
+  // Find the nearest point on the route, without allowing
+  // extrapolation.
+  double min_distance_from_line = std::numeric_limits<double>::infinity();
+  double min_distance_on_line = std::numeric_limits<double>::infinity();
+  size_t min_segment_index = 0;
+
+  for (size_t i = start_index; i <= end_index; ++i) {
+    double distance_from_line;
+    double distance_on_line;
+
+    nearestDistanceToLineSegment(distance_from_line,
+                                 distance_on_line,
+                                 route.points[i+0].position(),
+                                 route.points[i+1].position(),
+                                 point,
+                                 false, false);
+
+    if (distance_from_line <= min_distance_from_line) {
+      min_segment_index = i;
+      min_distance_on_line = distance_on_line;
+      min_distance_from_line = distance_from_line;
+    }
+  }
+
+  // We have identified the closest segment.  We need to clamp it
+  // to the window boundaries.
+  if (min_segment_index == start_index) {
+    nearestDistanceToLineSegment(min_distance_from_line,
+                                 min_distance_on_line,
+                                 route.points[min_segment_index+0].position(),
+                                 route.points[min_segment_index+1].position(),
+                                 point,
+                                 true, false);
+    if (min_distance_on_line < start.distance) {
+      min_distance_on_line = start.distance;
+    }
+  } else if (min_segment_index == end_index) {
+    nearestDistanceToLineSegment(min_distance_from_line,
+                                 min_distance_on_line,
+                                 route.points[min_segment_index+0].position(),
+                                 route.points[min_segment_index+1].position(),
+                                 point,
+                                 false, true);
+    if (min_distance_on_line > end.distance) {
+      min_distance_on_line = end.distance;
+    }
+  }
+
+  position.id = route.points[min_segment_index].id();
+  position.distance = min_distance_on_line;
+  return true;
+}
+
 
 static
 void interpolateRouteSegment(
@@ -266,7 +405,8 @@ void interpolateRouteSegment(
 
   // Interpolate other known properties here.
 }
-  
+
+
 bool normalizeRoutePosition(mnm::RoutePosition &normalized_position,
                             const Route &route,
                             const mnm::RoutePosition &position)
